@@ -11,6 +11,9 @@
     clippy::unreadable_literal
 )]
 
+pub static BLOCKBYTES: usize = 128;
+pub static BYTES: usize = 64;
+
 #[inline(always)]
 fn load_be(base: &[u8], offset: usize) -> u64 {
     let addr = &base[offset..];
