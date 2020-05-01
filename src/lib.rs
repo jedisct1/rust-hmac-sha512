@@ -313,7 +313,8 @@ impl Hash {
     }
 
     /// Absorb content
-    pub fn update(&mut self, input: &[u8]) {
+    pub fn update<T: AsRef<[u8]>>(&mut self, input: T) {
+        let input = input.as_ref();
         let mut n = input.len();
         self.len += n;
         let av = 128 - self.r;
@@ -352,7 +353,7 @@ impl Hash {
     }
 
     /// Compute SHA256(`input`)
-    pub fn hash(input: &[u8]) -> [u8; 64] {
+    pub fn hash<T: AsRef<[u8]>>(input: T) -> [u8; 64] {
         let mut h = Hash::new();
         h.update(input);
         h.finalize()
@@ -369,7 +370,9 @@ pub struct HMAC;
 
 impl HMAC {
     /// Compute HMAC-SHA256(`input`, `k`)
-    pub fn mac(input: &[u8], k: &[u8]) -> [u8; 64] {
+    pub fn mac<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U) -> [u8; 64] {
+        let input = input.as_ref();
+        let k = k.as_ref();
         let mut hk = [0u8; 64];
         let k2 = if k.len() > 128 {
             hk.copy_from_slice(&Hash::hash(k));
@@ -382,7 +385,7 @@ impl HMAC {
         for (p, &k) in padded.iter_mut().zip(k2.iter()) {
             *p ^= k;
         }
-        ih.update(&padded);
+        ih.update(&padded[..]);
         ih.update(input);
 
         let mut oh = Hash::new();
@@ -390,8 +393,8 @@ impl HMAC {
         for (p, &k) in padded.iter_mut().zip(k2.iter()) {
             *p ^= k;
         }
-        oh.update(&padded);
-        oh.update(&ih.finalize());
+        oh.update(&padded[..]);
+        oh.update(&ih.finalize()[..]);
         oh.finalize()
     }
 }
@@ -410,7 +413,7 @@ fn main() {
         .to_vec()
     );
 
-    let h = HMAC::mac(&[42u8; 69], &[]);
+    let h = HMAC::mac([42u8; 69].to_vec(), &[]);
     assert_eq!(
         h.to_vec(),
         [
@@ -422,7 +425,7 @@ fn main() {
         .to_vec()
     );
 
-    let h = HMAC::mac(&[69u8; 250], &[42u8; 50]);
+    let h = HMAC::mac(&[69u8; 250].to_vec(), [42u8; 50].to_vec());
     assert_eq!(
         h.to_vec(),
         [
