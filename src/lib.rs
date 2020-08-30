@@ -470,9 +470,13 @@ pub mod sha384 {
             })
         }
 
+        fn _update<T: AsRef<[u8]>>(&mut self, input: T) {
+            self.0.update(input)
+        }
+
         /// Absorb content
         pub fn update<T: AsRef<[u8]>>(&mut self, input: T) {
-            self.0.update(input)
+            self._update(input)
         }
 
         /// Compute SHA384(absorbed content)
@@ -487,6 +491,12 @@ pub mod sha384 {
             let mut h = Hash::new();
             h.update(input);
             h.finalize()
+        }
+    }
+
+    impl Default for Hash {
+        fn default() -> Self {
+            Self::new()
         }
     }
 
@@ -520,6 +530,38 @@ pub mod sha384 {
             oh.update(&padded[..]);
             oh.update(&ih.finalize()[..]);
             oh.finalize()
+        }
+    }
+
+    #[cfg(feature = "traits")]
+    mod digest_trait {
+        use super::Hash;
+        use digest::consts::{U128, U48};
+        use digest::{BlockInput, FixedOutputDirty, Reset, Update};
+
+        impl BlockInput for Hash {
+            type BlockSize = U128;
+        }
+
+        impl Update for Hash {
+            fn update(&mut self, input: impl AsRef<[u8]>) {
+                self._update(input);
+            }
+        }
+
+        impl FixedOutputDirty for Hash {
+            type OutputSize = U48;
+
+            fn finalize_into_dirty(&mut self, out: &mut digest::Output<Self>) {
+                let h = self.finalize();
+                out.copy_from_slice(&h);
+            }
+        }
+
+        impl Reset for Hash {
+            fn reset(&mut self) {
+                *self = Self::new();
+            }
         }
     }
 }
