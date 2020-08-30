@@ -315,8 +315,7 @@ impl Hash {
         }
     }
 
-    /// Absorb content
-    pub fn update<T: AsRef<[u8]>>(&mut self, input: T) {
+    fn _update<T: AsRef<[u8]>>(&mut self, input: T) {
         let input = input.as_ref();
         let mut n = input.len();
         self.len += n;
@@ -337,6 +336,11 @@ impl Hash {
                 self.r = rb;
             }
         }
+    }
+
+    /// Absorb content
+    pub fn update<T: AsRef<[u8]>>(&mut self, input: T) {
+        self._update(input)
     }
 
     /// Compute SHA512(absorbed content)
@@ -371,7 +375,7 @@ impl Default for Hash {
 
 #[cfg(feature = "traits")]
 mod digest_trait {
-    use super::{Hash, State};
+    use super::Hash;
     use digest::consts::{U128, U64};
     use digest::{BlockInput, FixedOutputDirty, Reset, Update};
 
@@ -381,7 +385,7 @@ mod digest_trait {
 
     impl Update for Hash {
         fn update(&mut self, input: impl AsRef<[u8]>) {
-            self.update(input.as_ref());
+            self._update(input);
         }
     }
 
@@ -396,7 +400,7 @@ mod digest_trait {
 
     impl Reset for Hash {
         fn reset(&mut self) {
-            self.state = State::new();
+            *self = Self::new();
         }
     }
 }
