@@ -3,7 +3,7 @@ name = "hmac-sha512"
 version = "0.1.5"
 authors = ["Frank Denis <github@pureftpd.org>"]
 edition = "2018"
-description = "A small, self-contained SHA512 and HMAC-SHA512 implementation"
+description = "A small, self-contained SHA512, HMAC-SHA512, SHA384 and HMAC-SHA384 implementation"
 keywords = ["crypto", "hash", "hmac", "sha2", "sha512"]
 repository = "https://github.com/jedisct1/rust-hmac-sha512"
 homepage = "https://github.com/jedisct1/rust-hmac-sha512"
@@ -11,6 +11,12 @@ categories = ["algorithms", "cryptography", "no-std"]
 license = "ISC"
 
 [dependencies]
+digest = { version = "0.9", optional = true }
+
+[features]
+default = ["sha384"]
+traits = ["digest"]
+sha384 = []
 
 [profile.release]
 lto = true

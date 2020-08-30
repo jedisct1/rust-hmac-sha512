@@ -339,7 +339,7 @@ impl Hash {
         }
     }
 
-    /// Compute SHA256(absorbed content)
+    /// Compute SHA512(absorbed content)
     pub fn finalize(mut self) -> [u8; 64] {
         let mut padded = [0u8; 256];
         padded[..self.r].copy_from_slice(&self.w[..self.r]);
@@ -355,7 +355,7 @@ impl Hash {
         out
     }
 
-    /// Compute SHA256(`input`)
+    /// Compute SHA512(`input`)
     pub fn hash<T: AsRef<[u8]>>(input: T) -> [u8; 64] {
         let mut h = Hash::new();
         h.update(input);
@@ -369,10 +369,42 @@ impl Default for Hash {
     }
 }
 
+#[cfg(feature = "traits")]
+mod digest_trait {
+    use super::{Hash, State};
+    use digest::consts::{U128, U64};
+    use digest::{BlockInput, FixedOutputDirty, Reset, Update};
+
+    impl BlockInput for Hash {
+        type BlockSize = U128;
+    }
+
+    impl Update for Hash {
+        fn update(&mut self, input: impl AsRef<[u8]>) {
+            self.update(input.as_ref());
+        }
+    }
+
+    impl FixedOutputDirty for Hash {
+        type OutputSize = U64;
+
+        fn finalize_into_dirty(&mut self, out: &mut digest::Output<Self>) {
+            let h = self.finalize();
+            out.copy_from_slice(&h);
+        }
+    }
+
+    impl Reset for Hash {
+        fn reset(&mut self) {
+            self.state = State::new();
+        }
+    }
+}
+
 pub struct HMAC;
 
 impl HMAC {
-    /// Compute HMAC-SHA256(`input`, `k`)
+    /// Compute HMAC-SHA512(`input`, `k`)
     pub fn mac<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U) -> [u8; 64] {
         let input = input.as_ref();
         let k = k.as_ref();
@@ -399,6 +431,92 @@ impl HMAC {
         oh.update(&padded[..]);
         oh.update(&ih.finalize()[..]);
         oh.finalize()
+    }
+}
+
+#[cfg(feature = "sha384")]
+pub mod sha384 {
+    use super::load_be;
+
+    fn new_state() -> super::State {
+        const IV: [u8; 64] = [
+            0xcb, 0xbb, 0x9d, 0x5d, 0xc1, 0x05, 0x9e, 0xd8, 0x62, 0x9a, 0x29, 0x2a, 0x36, 0x7c,
+            0xd5, 0x07, 0x91, 0x59, 0x01, 0x5a, 0x30, 0x70, 0xdd, 0x17, 0x15, 0x2f, 0xec, 0xd8,
+            0xf7, 0x0e, 0x59, 0x39, 0x67, 0x33, 0x26, 0x67, 0xff, 0xc0, 0x0b, 0x31, 0x8e, 0xb4,
+            0x4a, 0x87, 0x68, 0x58, 0x15, 0x11, 0xdb, 0x0c, 0x2e, 0x0d, 0x64, 0xf9, 0x8f, 0xa7,
+            0x47, 0xb5, 0x48, 0x1d, 0xbe, 0xfa, 0x4f, 0xa4,
+        ];
+        let mut t = [0u64; 8];
+        for (i, e) in t.iter_mut().enumerate() {
+            *e = load_be(&IV, i * 8)
+        }
+        super::State(t)
+    }
+
+    #[derive(Copy, Clone)]
+    pub struct Hash(super::Hash);
+
+    impl Hash {
+        pub fn new() -> Hash {
+            Hash(super::Hash {
+                state: new_state(),
+                r: 0,
+                w: [0u8; 128],
+                len: 0,
+            })
+        }
+
+        /// Absorb content
+        pub fn update<T: AsRef<[u8]>>(&mut self, input: T) {
+            self.0.update(input)
+        }
+
+        /// Compute SHA384(absorbed content)
+        pub fn finalize(self) -> [u8; 48] {
+            let mut h = [0u8; 48];
+            h.copy_from_slice(&self.0.finalize()[..48]);
+            h
+        }
+
+        /// Compute SHA384(`input`)
+        pub fn hash<T: AsRef<[u8]>>(input: T) -> [u8; 48] {
+            let mut h = Hash::new();
+            h.update(input);
+            h.finalize()
+        }
+    }
+
+    pub struct HMAC;
+
+    impl HMAC {
+        /// Compute HMAC-SHA384(`input`, `k`)
+        pub fn mac<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U) -> [u8; 48] {
+            let input = input.as_ref();
+            let k = k.as_ref();
+            let mut hk = [0u8; 48];
+            let k2 = if k.len() > 128 {
+                hk.copy_from_slice(&Hash::hash(k));
+                &hk
+            } else {
+                k
+            };
+            let mut ih = Hash::new();
+            let mut padded = [0x36; 128];
+            for (p, &k) in padded.iter_mut().zip(k2.iter()) {
+                *p ^= k;
+            }
+            ih.update(&padded[..]);
+            ih.update(input);
+
+            let mut oh = Hash::new();
+            let mut padded = [0x5c; 128];
+            for (p, &k) in padded.iter_mut().zip(k2.iter()) {
+                *p ^= k;
+            }
+            oh.update(&padded[..]);
+            oh.update(&ih.finalize()[..]);
+            oh.finalize()
+        }
     }
 }
 
@@ -448,6 +566,21 @@ fn main() {
             244, 226, 206, 78, 194, 120, 122, 208, 179, 5, 69, 225, 124, 222, 218, 168, 51, 183,
             214, 184, 167, 2, 3, 139, 39, 78, 174, 163, 244, 228, 190, 157, 145, 78, 235, 97, 241,
             112, 46, 105, 108, 32, 58, 18, 104, 84
+        ]
+        .to_vec()
+    );
+}
+
+#[cfg(feature = "sha384")]
+#[test]
+fn sha384() {
+    let h = sha384::HMAC::mac(b"Hi There", &[0x0b; 20]);
+    assert_eq!(
+        h.to_vec(),
+        [
+            175, 208, 57, 68, 216, 72, 149, 98, 107, 8, 37, 244, 171, 70, 144, 127, 21, 249, 218,
+            219, 228, 16, 30, 198, 130, 170, 3, 76, 124, 235, 197, 156, 250, 234, 158, 169, 7, 110,
+            222, 127, 74, 241, 82, 232, 178, 250, 156, 182
         ]
         .to_vec()
     );
