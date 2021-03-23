@@ -84,7 +84,8 @@ impl W {
         x.rotate_right(19) ^ x.rotate_right(61) ^ (x >> 6)
     }
 
-    #[inline(always)]
+    #[cfg_attr(feature = "opt_size", inline(never))]
+    #[cfg_attr(not(feature = "opt_size"), inline(always))]
     fn M(&mut self, a: usize, b: usize, c: usize, d: usize) {
         let w = &mut self.0;
         w[a] = w[a]
@@ -113,7 +114,8 @@ impl W {
         self.M(15, (15 + 14) & 15, (15 + 9) & 15, (15 + 1) & 15);
     }
 
-    #[inline(always)]
+    #[cfg_attr(feature = "opt_size", inline(never))]
+    #[cfg_attr(not(feature = "opt_size"), inline(always))]
     fn F(&mut self, state: &mut State, i: usize, k: u64) {
         let t = &mut state.0;
         t[(16 - i + 7) & 7] = t[(16 - i + 7) & 7]
@@ -428,7 +430,7 @@ impl HMAC {
         ih.update(input);
 
         let mut oh = Hash::new();
-        let mut padded = [0x5c; 128];
+        padded = [0x5c; 128];
         for (p, &k) in padded.iter_mut().zip(k2.iter()) {
             *p ^= k;
         }
