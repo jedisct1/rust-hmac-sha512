@@ -423,7 +423,7 @@ mod digest_trait010 {
             AlgorithmName, Block, BlockSizeUser, Buffer, BufferKindUser, FixedOutputCore,
             OutputSizeUser, Reset, UpdateCore,
         },
-        HashMarker, Output,
+        FixedOutput, FixedOutputReset, HashMarker, Output, Update,
     };
 
     use super::Hash;
@@ -457,6 +457,13 @@ mod digest_trait010 {
         }
     }
 
+    impl Update for Hash {
+        #[inline]
+        fn update(&mut self, data: &[u8]) {
+            self._update(data);
+        }
+    }
+
     impl FixedOutputCore for Hash {
         fn finalize_fixed_core(&mut self, buffer: &mut Buffer<Self>, out: &mut Output<Self>) {
             self._update(buffer.get_data());
@@ -465,9 +472,23 @@ mod digest_trait010 {
         }
     }
 
+    impl FixedOutput for Hash {
+        fn finalize_into(self, out: &mut Output<Self>) {
+            let h = self.finalize();
+            out.copy_from_slice(&h);
+        }
+    }
+
     impl Reset for Hash {
         fn reset(&mut self) {
-            *self = Self::new();
+            *self = Self::new()
+        }
+    }
+
+    impl FixedOutputReset for Hash {
+        fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
+            self.finalize_into(out);
+            self.reset();
         }
     }
 }
@@ -647,7 +668,7 @@ pub mod sha384 {
                 AlgorithmName, Block, BlockSizeUser, Buffer, BufferKindUser, FixedOutputCore,
                 OutputSizeUser, Reset, UpdateCore,
             },
-            HashMarker, Output,
+            FixedOutput, FixedOutputReset, HashMarker, Output, Update,
         };
 
         use super::Hash;
@@ -681,6 +702,13 @@ pub mod sha384 {
             }
         }
 
+        impl Update for Hash {
+            #[inline]
+            fn update(&mut self, data: &[u8]) {
+                self._update(data);
+            }
+        }
+
         impl FixedOutputCore for Hash {
             fn finalize_fixed_core(&mut self, buffer: &mut Buffer<Self>, out: &mut Output<Self>) {
                 self._update(buffer.get_data());
@@ -689,9 +717,23 @@ pub mod sha384 {
             }
         }
 
+        impl FixedOutput for Hash {
+            fn finalize_into(self, out: &mut Output<Self>) {
+                let h = self.finalize();
+                out.copy_from_slice(&h);
+            }
+        }
+
         impl Reset for Hash {
             fn reset(&mut self) {
-                *self = Self::new();
+                *self = Self::new()
+            }
+        }
+
+        impl FixedOutputReset for Hash {
+            fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
+                self.finalize_into(out);
+                self.reset();
             }
         }
     }
