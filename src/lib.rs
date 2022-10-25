@@ -418,6 +418,7 @@ mod digest_trait010 {
 
     use digest010::{
         block_buffer::Eager,
+        const_oid::{AssociatedOid, ObjectIdentifier},
         consts::{U128, U64},
         core_api::{
             AlgorithmName, Block, BlockSizeUser, Buffer, BufferKindUser, FixedOutputCore,
@@ -427,6 +428,10 @@ mod digest_trait010 {
     };
 
     use super::Hash;
+
+    impl AssociatedOid for Hash {
+        const OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.3");
+    }
 
     impl AlgorithmName for Hash {
         fn write_alg_name(f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -663,6 +668,7 @@ pub mod sha384 {
 
         use digest010::{
             block_buffer::Eager,
+            const_oid::{AssociatedOid, ObjectIdentifier},
             consts::{U128, U48},
             core_api::{
                 AlgorithmName, Block, BlockSizeUser, Buffer, BufferKindUser, FixedOutputCore,
@@ -672,6 +678,10 @@ pub mod sha384 {
         };
 
         use super::Hash;
+
+        impl AssociatedOid for Hash {
+            const OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
+        }
 
         impl AlgorithmName for Hash {
             fn write_alg_name(f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -741,7 +751,7 @@ pub mod sha384 {
 
 #[test]
 fn main() {
-    let h = HMAC::mac(&[], &[0u8; 32]);
+    let h = HMAC::mac([], [0u8; 32]);
     assert_eq!(
         h.to_vec(),
         [
@@ -753,7 +763,7 @@ fn main() {
         .to_vec()
     );
 
-    let h = HMAC::mac([42u8; 69].to_vec(), &[]);
+    let h = HMAC::mac([42u8; 69], []);
     assert_eq!(
         h.to_vec(),
         [
@@ -765,7 +775,7 @@ fn main() {
         .to_vec()
     );
 
-    let h = HMAC::mac(&[69u8; 250].to_vec(), [42u8; 50].to_vec());
+    let h = HMAC::mac([69u8; 250], [42u8; 50]);
     assert_eq!(
         h.to_vec(),
         [
@@ -777,7 +787,7 @@ fn main() {
         .to_vec()
     );
 
-    let h = HMAC::mac(b"Hi There", &[0x0b; 20]);
+    let h = HMAC::mac(b"Hi There", [0x0b; 20]);
     assert_eq!(
         h.to_vec(),
         [
@@ -793,7 +803,7 @@ fn main() {
 #[cfg(feature = "sha384")]
 #[test]
 fn sha384() {
-    let h = sha384::HMAC::mac(b"Hi There", &[0x0b; 20]);
+    let h = sha384::HMAC::mac(b"Hi There", [0x0b; 20]);
     assert_eq!(
         h.to_vec(),
         [
