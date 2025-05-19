@@ -40,6 +40,28 @@ fn store_be(base: &mut [u8], offset: usize, x: u64) {
     addr[0] = (x >> 56) as u8;
 }
 
+fn verify(x: &[u8], y: &[u8]) -> bool {
+    if x.len() != y.len() {
+        return false;
+    }
+    let mut v: u32 = 0;
+
+    #[cfg(any(target_arch = "wasm32", target_arch = "wasm64"))]
+    {
+        let (mut h1, mut h2) = (0u32, 0u32);
+        for (b1, b2) in x.iter().zip(y.iter()) {
+            h1 ^= (h1 << 5).wrapping_add((h1 >> 2) ^ *b1 as u32);
+            h2 ^= (h2 << 5).wrapping_add((h2 >> 2) ^ *b2 as u32);
+        }
+        v |= h1 ^ h2;
+    }
+    for (a, b) in x.iter().zip(y.iter()) {
+        v |= (a ^ b) as u32;
+    }
+    let v = unsafe { core::ptr::read_volatile(&v) };
+    v == 0
+}
+
 struct W([u64; 16]);
 
 #[derive(Copy, Clone)]
@@ -367,6 +389,12 @@ impl Hash {
         h.update(input);
         h.finalize()
     }
+
+    /// Verify that the hash matches an expected value
+    pub fn verify(self, expected: &[u8; 64]) -> bool {
+        let out = self.finalize();
+        verify(&out, expected)
+    }
 }
 
 impl Default for Hash {
@@ -529,6 +557,12 @@ impl HMAC {
         oh.update(&ih.finalize()[..]);
         oh.finalize()
     }
+
+    /// Verify that a message's HMAC matches the expected value
+    pub fn verify<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U, expected: &[u8; 64]) -> bool {
+        let mac = Self::mac(input, k);
+        verify(&mac, expected)
+    }
 }
 
 #[cfg(feature = "sha384")]
@@ -622,6 +656,12 @@ pub mod sha384 {
             oh.update(&padded[..]);
             oh.update(&ih.finalize()[..]);
             oh.finalize()
+        }
+
+        /// Verify that a message's HMAC matches the expected value
+        pub fn verify<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U, expected: &[u8; 48]) -> bool {
+            let mac = Self::mac(input, k);
+            super::verify(&mac, expected)
         }
     }
 
@@ -752,65 +792,63 @@ pub mod sha384 {
 #[test]
 fn main() {
     let h = HMAC::mac([], [0u8; 32]);
-    assert_eq!(
-        h.to_vec(),
-        [
-            185, 54, 206, 232, 108, 159, 135, 170, 93, 60, 111, 46, 132, 203, 90, 66, 57, 165, 254,
-            80, 72, 10, 110, 198, 107, 112, 171, 91, 31, 74, 198, 115, 12, 108, 81, 84, 33, 179,
-            39, 236, 29, 105, 64, 46, 83, 223, 180, 154, 215, 56, 30, 176, 103, 179, 56, 253, 123,
-            12, 178, 34, 71, 34, 93, 71
-        ]
-        .to_vec()
-    );
+    let expected: [u8; 64] = [
+        185, 54, 206, 232, 108, 159, 135, 170, 93, 60, 111, 46, 132, 203, 90, 66, 57, 165, 254, 80,
+        72, 10, 110, 198, 107, 112, 171, 91, 31, 74, 198, 115, 12, 108, 81, 84, 33, 179, 39, 236,
+        29, 105, 64, 46, 83, 223, 180, 154, 215, 56, 30, 176, 103, 179, 56, 253, 123, 12, 178, 34,
+        71, 34, 93, 71,
+    ];
+    assert_eq!(h.to_vec(), expected.to_vec());
+    assert!(HMAC::verify([], [0u8; 32], &expected));
 
     let h = HMAC::mac([42u8; 69], []);
-    assert_eq!(
-        h.to_vec(),
-        [
-            56, 224, 189, 205, 65, 104, 107, 85, 241, 188, 253, 35, 238, 174, 69, 191, 206, 183,
-            205, 71, 196, 180, 56, 122, 106, 55, 136, 7, 208, 183, 99, 67, 229, 213, 255, 154, 107,
-            136, 11, 154, 11, 187, 75, 214, 172, 117, 14, 248, 189, 48, 193, 62, 37, 208, 159, 227,
-            115, 59, 54, 91, 143, 143, 254, 220
-        ]
-        .to_vec()
-    );
+    let expected: [u8; 64] = [
+        56, 224, 189, 205, 65, 104, 107, 85, 241, 188, 253, 35, 238, 174, 69, 191, 206, 183, 205,
+        71, 196, 180, 56, 122, 106, 55, 136, 7, 208, 183, 99, 67, 229, 213, 255, 154, 107, 136, 11,
+        154, 11, 187, 75, 214, 172, 117, 14, 248, 189, 48, 193, 62, 37, 208, 159, 227, 115, 59, 54,
+        91, 143, 143, 254, 220,
+    ];
+    assert_eq!(h.to_vec(), expected.to_vec());
+    assert!(HMAC::verify([42u8; 69], [], &expected));
 
     let h = HMAC::mac([69u8; 250], [42u8; 50]);
-    assert_eq!(
-        h.to_vec(),
-        [
-            122, 111, 187, 241, 74, 194, 22, 106, 95, 206, 80, 215, 75, 207, 11, 78, 37, 94, 125,
-            110, 125, 42, 254, 103, 224, 21, 112, 247, 233, 229, 36, 200, 58, 238, 211, 156, 121,
-            231, 15, 202, 128, 90, 126, 179, 188, 37, 194, 106, 223, 218, 45, 211, 149, 91, 131,
-            226, 117, 184, 175, 85, 224, 197, 82, 175
-        ]
-        .to_vec()
-    );
+    let expected: [u8; 64] = [
+        122, 111, 187, 241, 74, 194, 22, 106, 95, 206, 80, 215, 75, 207, 11, 78, 37, 94, 125, 110,
+        125, 42, 254, 103, 224, 21, 112, 247, 233, 229, 36, 200, 58, 238, 211, 156, 121, 231, 15,
+        202, 128, 90, 126, 179, 188, 37, 194, 106, 223, 218, 45, 211, 149, 91, 131, 226, 117, 184,
+        175, 85, 224, 197, 82, 175,
+    ];
+    assert_eq!(h.to_vec(), expected.to_vec());
+    assert!(HMAC::verify([69u8; 250], [42u8; 50], &expected));
 
     let h = HMAC::mac(b"Hi There", [0x0b; 20]);
-    assert_eq!(
-        h.to_vec(),
-        [
-            135, 170, 124, 222, 165, 239, 97, 157, 79, 240, 180, 36, 26, 29, 108, 176, 35, 121,
-            244, 226, 206, 78, 194, 120, 122, 208, 179, 5, 69, 225, 124, 222, 218, 168, 51, 183,
-            214, 184, 167, 2, 3, 139, 39, 78, 174, 163, 244, 228, 190, 157, 145, 78, 235, 97, 241,
-            112, 46, 105, 108, 32, 58, 18, 104, 84
-        ]
-        .to_vec()
-    );
+    let expected: [u8; 64] = [
+        135, 170, 124, 222, 165, 239, 97, 157, 79, 240, 180, 36, 26, 29, 108, 176, 35, 121, 244,
+        226, 206, 78, 194, 120, 122, 208, 179, 5, 69, 225, 124, 222, 218, 168, 51, 183, 214, 184,
+        167, 2, 3, 139, 39, 78, 174, 163, 244, 228, 190, 157, 145, 78, 235, 97, 241, 112, 46, 105,
+        108, 32, 58, 18, 104, 84,
+    ];
+    assert_eq!(h.to_vec(), expected.to_vec());
+    assert!(HMAC::verify(b"Hi There", [0x0b; 20], &expected));
+
+    // Test verify with incorrect expected value
+    let incorrect: [u8; 64] = [0u8; 64];
+    assert!(!HMAC::verify(b"Hi There", [0x0b; 20], &incorrect));
 }
 
 #[cfg(feature = "sha384")]
 #[test]
 fn sha384() {
     let h = sha384::HMAC::mac(b"Hi There", [0x0b; 20]);
-    assert_eq!(
-        h.to_vec(),
-        [
-            175, 208, 57, 68, 216, 72, 149, 98, 107, 8, 37, 244, 171, 70, 144, 127, 21, 249, 218,
-            219, 228, 16, 30, 198, 130, 170, 3, 76, 124, 235, 197, 156, 250, 234, 158, 169, 7, 110,
-            222, 127, 74, 241, 82, 232, 178, 250, 156, 182
-        ]
-        .to_vec()
-    );
+    let expected: [u8; 48] = [
+        175, 208, 57, 68, 216, 72, 149, 98, 107, 8, 37, 244, 171, 70, 144, 127, 21, 249, 218, 219,
+        228, 16, 30, 198, 130, 170, 3, 76, 124, 235, 197, 156, 250, 234, 158, 169, 7, 110, 222,
+        127, 74, 241, 82, 232, 178, 250, 156, 182,
+    ];
+    assert_eq!(h.to_vec(), expected.to_vec());
+    assert!(sha384::HMAC::verify(b"Hi There", [0x0b; 20], &expected));
+
+    // Test verify with incorrect expected value
+    let incorrect: [u8; 48] = [0u8; 48];
+    assert!(!sha384::HMAC::verify(b"Hi There", [0x0b; 20], &incorrect));
 }
