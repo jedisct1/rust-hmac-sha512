@@ -526,6 +526,55 @@ mod digest_trait010 {
     }
 }
 
+#[cfg(feature = "traits011")]
+mod digest_trait011 {
+    use digest011::{
+        const_oid::{AssociatedOid, ObjectIdentifier},
+        consts::U64,
+        FixedOutput, FixedOutputReset, HashMarker, Output, OutputSizeUser, Reset, Update,
+    };
+
+    use super::Hash;
+
+    impl AssociatedOid for Hash {
+        const OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.3");
+    }
+
+    impl HashMarker for Hash {}
+
+    impl OutputSizeUser for Hash {
+        type OutputSize = U64;
+    }
+
+    impl Update for Hash {
+        #[inline]
+        fn update(&mut self, data: &[u8]) {
+            self._update(data);
+        }
+    }
+
+    impl FixedOutput for Hash {
+        fn finalize_into(self, out: &mut Output<Self>) {
+            let h = self.finalize();
+            out.copy_from_slice(&h);
+        }
+    }
+
+    impl Reset for Hash {
+        fn reset(&mut self) {
+            *self = Self::new()
+        }
+    }
+
+    impl FixedOutputReset for Hash {
+        fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
+            let h = self.finalize();
+            out.copy_from_slice(&h);
+            self.reset();
+        }
+    }
+}
+
 pub struct HMAC;
 
 impl HMAC {
@@ -787,6 +836,55 @@ pub mod sha384 {
             }
         }
     }
+
+    #[cfg(feature = "traits011")]
+    mod digest_trait011 {
+        use digest011::{
+            const_oid::{AssociatedOid, ObjectIdentifier},
+            consts::U48,
+            FixedOutput, FixedOutputReset, HashMarker, Output, OutputSizeUser, Reset, Update,
+        };
+
+        use super::Hash;
+
+        impl AssociatedOid for Hash {
+            const OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("2.16.840.1.101.3.4.2.2");
+        }
+
+        impl HashMarker for Hash {}
+
+        impl OutputSizeUser for Hash {
+            type OutputSize = U48;
+        }
+
+        impl Update for Hash {
+            #[inline]
+            fn update(&mut self, data: &[u8]) {
+                self._update(data);
+            }
+        }
+
+        impl FixedOutput for Hash {
+            fn finalize_into(self, out: &mut Output<Self>) {
+                let h = self.finalize();
+                out.copy_from_slice(&h);
+            }
+        }
+
+        impl Reset for Hash {
+            fn reset(&mut self) {
+                *self = Self::new()
+            }
+        }
+
+        impl FixedOutputReset for Hash {
+            fn finalize_into_reset(&mut self, out: &mut Output<Self>) {
+                let h = self.finalize();
+                out.copy_from_slice(&h);
+                self.reset();
+            }
+        }
+    }
 }
 
 #[test]
@@ -851,4 +949,32 @@ fn sha384() {
     // Test verify with incorrect expected value
     let incorrect: [u8; 48] = [0u8; 48];
     assert!(!sha384::HMAC::verify(b"Hi There", [0x0b; 20], &incorrect));
+}
+
+#[cfg(feature = "traits011")]
+#[test]
+fn digest011_sha512() {
+    use digest011::Digest;
+
+    let mut hasher = Hash::new();
+    hasher.update(b"hello");
+    hasher.update(b" world");
+    let result = hasher.finalize();
+
+    let expected = Hash::digest(b"hello world");
+    assert_eq!(result.as_slice(), expected.as_slice());
+}
+
+#[cfg(all(feature = "traits011", feature = "sha384"))]
+#[test]
+fn digest011_sha384() {
+    use digest011::Digest;
+
+    let mut hasher = sha384::Hash::new();
+    hasher.update(b"hello");
+    hasher.update(b" world");
+    let result = hasher.finalize();
+
+    let expected = sha384::Hash::digest(b"hello world");
+    assert_eq!(result.as_slice(), expected.as_slice());
 }
