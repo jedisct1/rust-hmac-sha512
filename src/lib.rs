@@ -1,6 +1,6 @@
 //! A small, self-contained SHA512, HMAC-SHA512, and HKDF-SHA512 implementation.
 //!
-//! Also includes SHA384 and HMAC-SHA384 when the `sha384` feature is enabled (default).
+//! Also includes SHA384, HMAC-SHA384, and HKDF-SHA384 when the `sha384` feature is enabled (default).
 //!
 //! (C) Frank Denis <fdenis [at] fastly [dot] com>
 
@@ -830,6 +830,98 @@ pub mod sha384 {
         }
     }
 
+    /// HMAC-based Key Derivation Function (HKDF) implementation using SHA-384.
+    ///
+    /// HKDF is a key derivation function based on HMAC, standardized in RFC 5869.
+    /// It derives cryptographically strong keys from input keying material.
+    ///
+    /// The HKDF process consists of two stages:
+    /// 1. Extract: Takes input keying material and an optional salt, produces a pseudorandom key (PRK)
+    /// 2. Expand: Takes the PRK and optional context info, generates output keying material
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// let prk = hmac_sha512::sha384::HKDF::extract(b"salt value", b"input key material");
+    ///
+    /// let mut okm = [0u8; 96];
+    /// hmac_sha512::sha384::HKDF::expand(&mut okm, prk, b"application info");
+    /// ```
+    pub struct HKDF;
+
+    impl HKDF {
+        /// Performs the HKDF-Extract function.
+        ///
+        /// Extracts a pseudorandom key from the input keying material using the optional salt.
+        ///
+        /// # Arguments
+        ///
+        /// * `salt` - Optional salt value (a non-secret random value)
+        /// * `ikm` - Input keying material (the secret input)
+        ///
+        /// # Returns
+        ///
+        /// A 48-byte pseudorandom key
+        pub fn extract(salt: impl AsRef<[u8]>, ikm: impl AsRef<[u8]>) -> [u8; 48] {
+            HMAC::mac(ikm, salt)
+        }
+
+        /// Performs the HKDF-Expand function.
+        ///
+        /// Expands the pseudorandom key into output keying material of the desired length.
+        ///
+        /// # Arguments
+        ///
+        /// * `out` - Buffer to receive the output keying material
+        /// * `prk` - Pseudorandom key (from the extract step)
+        /// * `info` - Optional context and application specific information
+        ///
+        /// # Panics
+        ///
+        /// Panics if the requested output length is greater than 255 * 48 bytes (12240 bytes).
+        pub fn expand(out: &mut [u8], prk: impl AsRef<[u8]>, info: impl AsRef<[u8]>) {
+            let prk = prk.as_ref();
+            let info = info.as_ref();
+            let mut counter: u8 = 1;
+            assert!(out.len() < 0xff * 48);
+            let mut prev = [0u8; 48];
+            let mut i: usize = 0;
+            while i < out.len() {
+                let mut padded = [0x36u8; 128];
+                let mut hk = [0u8; 48];
+                let k2 = if prk.len() > 128 {
+                    hk.copy_from_slice(&Hash::hash(prk));
+                    &hk[..]
+                } else {
+                    prk
+                };
+                for (p, &k) in padded.iter_mut().zip(k2.iter()) {
+                    *p ^= k;
+                }
+                let mut ih = Hash::new();
+                ih.update(&padded[..]);
+                if i != 0 {
+                    ih.update(&prev[..]);
+                }
+                ih.update(info);
+                ih.update([counter]);
+
+                for p in padded.iter_mut() {
+                    *p ^= 0x6a;
+                }
+                let mut oh = Hash::new();
+                oh.update(&padded[..]);
+                oh.update(&ih.finalize()[..]);
+                prev = oh.finalize();
+
+                let left = core::cmp::min(48, out.len() - i);
+                out[i..][..left].copy_from_slice(&prev[..left]);
+                counter += 1;
+                i += 48;
+            }
+        }
+    }
+
     #[cfg(feature = "traits09")]
     mod digest_trait09 {
         use digest09::consts::{U128, U48};
@@ -1065,6 +1157,42 @@ fn sha384() {
     // Test verify with incorrect expected value
     let incorrect: [u8; 48] = [0u8; 48];
     assert!(!sha384::HMAC::verify(b"Hi There", [0x0b; 20], &incorrect));
+}
+
+#[cfg(feature = "sha384")]
+#[test]
+fn hkdf_sha384() {
+    // Test Case 1 - RFC 5869 equivalent for SHA-384
+    let ikm = [0x0bu8; 22];
+    let salt: [u8; 13] = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+    ];
+    let info: [u8; 10] = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9];
+
+    let prk = sha384::HKDF::extract(&salt, &ikm);
+    let mut okm = [0u8; 42];
+    sha384::HKDF::expand(&mut okm, &prk, &info);
+
+    // Expected value computed with reference implementation
+    let expected_okm: [u8; 42] = [
+        0x9b, 0x50, 0x97, 0xa8, 0x60, 0x38, 0xb8, 0x05, 0x30, 0x90, 0x76, 0xa4, 0x4b, 0x3a, 0x9f,
+        0x38, 0x06, 0x3e, 0x25, 0xb5, 0x16, 0xdc, 0xbf, 0x36, 0x9f, 0x39, 0x4c, 0xfa, 0xb4, 0x36,
+        0x85, 0xf7, 0x48, 0xb6, 0x45, 0x77, 0x63, 0xe4, 0xf0, 0x20, 0x4f, 0xc5,
+    ];
+    assert_eq!(okm, expected_okm);
+
+    // Test Case 2 - empty salt and info
+    let ikm = [0x0bu8; 22];
+    let prk = sha384::HKDF::extract([], &ikm);
+    let mut okm = [0u8; 42];
+    sha384::HKDF::expand(&mut okm, &prk, []);
+
+    let expected_okm: [u8; 42] = [
+        0xc8, 0xc9, 0x6e, 0x71, 0x0f, 0x89, 0xb0, 0xd7, 0x99, 0x0b, 0xca, 0x68, 0xbc, 0xde, 0xc8,
+        0xcf, 0x85, 0x40, 0x62, 0xe5, 0x4c, 0x73, 0xa7, 0xab, 0xc7, 0x43, 0xfa, 0xde, 0x9b, 0x24,
+        0x2d, 0xaa, 0xcc, 0x1c, 0xea, 0x56, 0x70, 0x41, 0x5b, 0x52, 0x84, 0x9c,
+    ];
+    assert_eq!(okm, expected_okm);
 }
 
 #[cfg(feature = "traits011")]
