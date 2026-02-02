@@ -1,6 +1,6 @@
 [package]
 name = "hmac-sha512"
-version = "1.1.8"
+version = "1.1.9"
 authors = ["Frank Denis <github@pureftpd.org>"]
 edition = "2018"
 description = "A small, self-contained SHA512, HMAC-SHA512, SHA384 and HMAC-SHA384 implementation"
