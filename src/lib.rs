@@ -1,4 +1,7 @@
-//! A small, self-contained SHA512 and HMAC-SHA512 implementation
+//! A small, self-contained SHA512, HMAC-SHA512, and HKDF-SHA512 implementation.
+//!
+//! Also includes SHA384 and HMAC-SHA384 when the `sha384` feature is enabled (default).
+//!
 //! (C) Frank Denis <fdenis [at] fastly [dot] com>
 
 #![no_std]
@@ -575,7 +578,10 @@ mod digest_trait011 {
     }
 }
 
-pub struct HMAC;
+pub struct HMAC {
+    ih: Hash,
+    padded: [u8; 128],
+}
 
 impl HMAC {
     /// Compute HMAC-SHA512(`input`, `k`)
@@ -607,10 +613,120 @@ impl HMAC {
         oh.finalize()
     }
 
+    /// Creates a new HMAC-SHA512 instance with the given key.
+    pub fn new(k: impl AsRef<[u8]>) -> HMAC {
+        let k = k.as_ref();
+        let mut hk = [0u8; 64];
+        let k2 = if k.len() > 128 {
+            hk.copy_from_slice(&Hash::hash(k));
+            &hk
+        } else {
+            k
+        };
+        let mut padded = [0x36; 128];
+        for (p, &k) in padded.iter_mut().zip(k2.iter()) {
+            *p ^= k;
+        }
+        let mut ih = Hash::new();
+        ih.update(&padded[..]);
+        HMAC { ih, padded }
+    }
+
+    /// Absorbs content into the HMAC state.
+    pub fn update(&mut self, input: impl AsRef<[u8]>) {
+        self.ih.update(input);
+    }
+
+    /// Computes the HMAC-SHA512 of all previously absorbed content.
+    pub fn finalize(mut self) -> [u8; 64] {
+        for p in self.padded.iter_mut() {
+            *p ^= 0x6a;
+        }
+        let mut oh = Hash::new();
+        oh.update(&self.padded[..]);
+        oh.update(self.ih.finalize());
+        oh.finalize()
+    }
+
+    /// Verifies that the HMAC of absorbed content matches the expected MAC.
+    pub fn finalize_verify(self, expected: &[u8; 64]) -> bool {
+        let out = self.finalize();
+        verify(&out, expected)
+    }
+
     /// Verify that a message's HMAC matches the expected value
     pub fn verify<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U, expected: &[u8; 64]) -> bool {
         let mac = Self::mac(input, k);
         verify(&mac, expected)
+    }
+}
+
+/// HMAC-based Key Derivation Function (HKDF) implementation using SHA-512.
+///
+/// HKDF is a key derivation function based on HMAC, standardized in RFC 5869.
+/// It derives cryptographically strong keys from input keying material.
+///
+/// The HKDF process consists of two stages:
+/// 1. Extract: Takes input keying material and an optional salt, produces a pseudorandom key (PRK)
+/// 2. Expand: Takes the PRK and optional context info, generates output keying material
+///
+/// # Examples
+///
+/// ```
+/// let prk = hmac_sha512::HKDF::extract(b"salt value", b"input key material");
+///
+/// let mut okm = [0u8; 128];
+/// hmac_sha512::HKDF::expand(&mut okm, prk, b"application info");
+/// ```
+pub struct HKDF;
+
+impl HKDF {
+    /// Performs the HKDF-Extract function.
+    ///
+    /// Extracts a pseudorandom key from the input keying material using the optional salt.
+    ///
+    /// # Arguments
+    ///
+    /// * `salt` - Optional salt value (a non-secret random value)
+    /// * `ikm` - Input keying material (the secret input)
+    ///
+    /// # Returns
+    ///
+    /// A 64-byte pseudorandom key
+    pub fn extract(salt: impl AsRef<[u8]>, ikm: impl AsRef<[u8]>) -> [u8; 64] {
+        HMAC::mac(ikm, salt)
+    }
+
+    /// Performs the HKDF-Expand function.
+    ///
+    /// Expands the pseudorandom key into output keying material of the desired length.
+    ///
+    /// # Arguments
+    ///
+    /// * `out` - Buffer to receive the output keying material
+    /// * `prk` - Pseudorandom key (from the extract step)
+    /// * `info` - Optional context and application specific information
+    ///
+    /// # Panics
+    ///
+    /// Panics if the requested output length is greater than 255 * 64 bytes (16320 bytes).
+    pub fn expand(out: &mut [u8], prk: impl AsRef<[u8]>, info: impl AsRef<[u8]>) {
+        let info = info.as_ref();
+        let mut counter: u8 = 1;
+        assert!(out.len() < 0xff * 64);
+        let mut i: usize = 0;
+        while i < out.len() {
+            let mut hmac = HMAC::new(&prk);
+            if i != 0 {
+                hmac.update(&out[i - 64..][..64]);
+            }
+            hmac.update(info);
+            hmac.update([counter]);
+            let left = core::cmp::min(64, out.len() - i);
+            out[i..][..left].copy_from_slice(&hmac.finalize()[..left]);
+            counter += 1;
+            i += 64;
+        }
     }
 }
 
@@ -977,4 +1093,56 @@ fn digest011_sha384() {
 
     let expected = sha384::Hash::digest(b"hello world");
     assert_eq!(result.as_slice(), expected.as_slice());
+}
+
+#[test]
+fn hkdf() {
+    // Test Case 1 from brycx/Test-Vector-Generation (RFC 5869 equivalent for SHA512)
+    let ikm = [0x0bu8; 22];
+    let salt: [u8; 13] = [0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c];
+    let info: [u8; 10] = [0xf0, 0xf1, 0xf2, 0xf3, 0xf4, 0xf5, 0xf6, 0xf7, 0xf8, 0xf9];
+    let expected_okm: [u8; 42] = [
+        0x83, 0x23, 0x90, 0x08, 0x6c, 0xda, 0x71, 0xfb, 0x47, 0x62, 0x5b, 0xb5, 0xce, 0xb1,
+        0x68, 0xe4, 0xc8, 0xe2, 0x6a, 0x1a, 0x16, 0xed, 0x34, 0xd9, 0xfc, 0x7f, 0xe9, 0x2c,
+        0x14, 0x81, 0x57, 0x93, 0x38, 0xda, 0x36, 0x2c, 0xb8, 0xd9, 0xf9, 0x25, 0xd7, 0xcb,
+    ];
+
+    let prk = HKDF::extract(&salt, &ikm);
+    let mut okm = [0u8; 42];
+    HKDF::expand(&mut okm, &prk, &info);
+    assert_eq!(okm, expected_okm);
+
+    // Test Case 3 - empty salt and info
+    let ikm = [0x0bu8; 22];
+    let expected_okm: [u8; 42] = [
+        0xf5, 0xfa, 0x02, 0xb1, 0x82, 0x98, 0xa7, 0x2a, 0x8c, 0x23, 0x89, 0x8a, 0x87, 0x03,
+        0x47, 0x2c, 0x6e, 0xb1, 0x79, 0xdc, 0x20, 0x4c, 0x03, 0x42, 0x5c, 0x97, 0x0e, 0x3b,
+        0x16, 0x4b, 0xf9, 0x0f, 0xff, 0x22, 0xd0, 0x48, 0x36, 0xd0, 0xe2, 0x34, 0x3b, 0xac,
+    ];
+
+    let prk = HKDF::extract([], &ikm);
+    let mut okm = [0u8; 42];
+    HKDF::expand(&mut okm, &prk, []);
+    assert_eq!(okm, expected_okm);
+}
+
+#[test]
+fn hmac_streaming() {
+    // Test that streaming HMAC produces the same result as one-shot
+    let key = b"secret key";
+    let message = b"Hello, World!";
+
+    let oneshot = HMAC::mac(message, key);
+
+    let mut streaming = HMAC::new(key);
+    streaming.update(b"Hello, ");
+    streaming.update(b"World!");
+    let result = streaming.finalize();
+
+    assert_eq!(oneshot, result);
+
+    // Test finalize_verify
+    let mut streaming = HMAC::new(key);
+    streaming.update(message);
+    assert!(streaming.finalize_verify(&oneshot));
 }

@@ -1,6 +1,6 @@
 # hmac-sha512
 
-A small, self-contained implementation of SHA512, HMAC-SHA512, SHA384, and HMAC-SHA384 in Rust.
+A small, self-contained SHA512, HMAC-SHA512, HKDF-SHA512, SHA384, and HMAC-SHA384 implementation in Rust.
 
 [![Crates.io](https://img.shields.io/crates/v/hmac-sha512)](https://crates.io/crates/hmac-sha512)
 [![Documentation](https://docs.rs/hmac-sha512/badge.svg)](https://docs.rs/hmac-sha512)
@@ -8,19 +8,21 @@ A small, self-contained implementation of SHA512, HMAC-SHA512, SHA384, and HMAC-
 
 ## Features
 
+- Pure Rust implementation
 - Minimal dependencies
 - `no_std` compatible for embedded systems
-- Small code size with optional size optimizations
-- Optional support for the `Digest` trait from the `digest` crate
-- Constant-time verification for HMAC results to prevent timing attacks
+- Both one-shot and streaming APIs for HMAC
+- HKDF key derivation (RFC 5869)
+- Constant-time verification to prevent timing attacks
+- Optional size optimizations
 
 ## Optional Features
 
 - `sha384` (enabled by default): Includes SHA384 and HMAC-SHA384 implementations
 - `opt_size`: Optimizes for binary size at a slight performance cost (reduces text section size by ~75% with ~16% performance hit)
-- `traits`: Enables support for the `Digest` trait from the `digest` crate
-  - `traits09`: Support for `digest` crate v0.9.x
-  - `traits010`: Support for `digest` crate v0.10.x
+- `traits09`: Support for `Digest` trait from `digest` crate v0.9.x
+- `traits010`: Support for `Digest` trait from `digest` crate v0.10.x
+- `traits011`: Support for `Digest` trait from `digest` crate v0.11.x
 
 ## Usage
 
@@ -28,7 +30,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-hmac-sha512 = "1.1.6"
+hmac-sha512 = "1.1"
 ```
 
 ### SHA512 Hashing
@@ -36,8 +38,14 @@ hmac-sha512 = "1.1.6"
 ```rust
 use hmac_sha512::Hash;
 
-// Compute SHA512 hash
+// One-shot hashing
 let hash = Hash::hash(b"message");
+
+// Incremental hashing
+let mut hasher = Hash::new();
+hasher.update(b"hello ");
+hasher.update(b"world");
+let hash = hasher.finalize();
 ```
 
 ### HMAC-SHA512
@@ -45,12 +53,38 @@ let hash = Hash::hash(b"message");
 ```rust
 use hmac_sha512::HMAC;
 
-// Compute HMAC-SHA512
+// One-shot HMAC
 let mac = HMAC::mac(b"message", b"key");
 
-// Verify HMAC-SHA512
-let expected = [0u8; 64]; // Replace with actual expected MAC
+// Incremental HMAC
+let mut hmac = HMAC::new(b"key");
+hmac.update(b"message part 1");
+hmac.update(b"message part 2");
+let mac = hmac.finalize();
+
+// Constant-time verification (one-shot)
+let expected = HMAC::mac(b"message", b"key");
 let is_valid = HMAC::verify(b"message", b"key", &expected);
+
+// Constant-time verification (streaming)
+let mut hmac = HMAC::new(b"key");
+hmac.update(b"message");
+assert!(hmac.finalize_verify(&expected));
+```
+
+### HKDF-SHA512
+
+HKDF (HMAC-based Key Derivation Function) as defined in RFC 5869.
+
+```rust
+use hmac_sha512::HKDF;
+
+// Extract a pseudorandom key from input keying material
+let prk = HKDF::extract(b"salt", b"input key material");
+
+// Expand the pseudorandom key to the desired output length
+let mut output = [0u8; 128];
+HKDF::expand(&mut output, prk, b"application info");
 ```
 
 ### SHA384 Hashing (when enabled)
@@ -58,7 +92,6 @@ let is_valid = HMAC::verify(b"message", b"key", &expected);
 ```rust
 use hmac_sha512::sha384::Hash;
 
-// Compute SHA384 hash
 let hash = Hash::hash(b"message");
 ```
 
@@ -67,19 +100,17 @@ let hash = Hash::hash(b"message");
 ```rust
 use hmac_sha512::sha384::HMAC;
 
-// Compute HMAC-SHA384
 let mac = HMAC::mac(b"message", b"key");
 
-// Verify HMAC-SHA384
 let expected = [0u8; 48]; // Replace with actual expected MAC
 let is_valid = HMAC::verify(b"message", b"key", &expected);
 ```
 
-### With Digest Trait (when enabled)
+### With Digest Trait
 
 ```rust
 use hmac_sha512::Hash;
-use digest::Digest;  // Requires the digest crate
+use digest::Digest;  // Requires enabling traits feature
 
 let mut hasher = Hash::new();
 hasher.update(b"message");
@@ -92,16 +123,14 @@ let result = hasher.finalize();
 # Build with default features
 cargo build
 
-# Build with release optimizations
-cargo build --release
+# Build with all features
+cargo build --all-features
 
-# Build with specific features
-cargo build --features="traits"
-cargo build --features="opt_size"
-cargo build --no-default-features  # Excludes SHA384 support
+# Build without SHA384 support
+cargo build --no-default-features
 
 # Run all tests
-cargo test
+cargo test --all-features
 ```
 
 ## License
