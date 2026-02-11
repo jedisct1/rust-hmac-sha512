@@ -792,17 +792,26 @@ pub mod sha384 {
         }
     }
 
-    pub struct HMAC;
+    pub struct HMAC {
+        ih: Hash,
+        padded: [u8; 128],
+    }
 
     impl HMAC {
         /// Compute HMAC-SHA384(`input`, `k`)
         pub fn mac<T: AsRef<[u8]>, U: AsRef<[u8]>>(input: T, k: U) -> [u8; 48] {
-            let input = input.as_ref();
+            let mut hmac = Self::new(k);
+            hmac.update(input);
+            hmac.finalize()
+        }
+
+        /// Creates a new HMAC-SHA384 instance with the given key.
+        pub fn new(k: impl AsRef<[u8]>) -> HMAC {
             let k = k.as_ref();
             let mut hk = [0u8; 48];
             let k2 = if k.len() > 128 {
                 hk.copy_from_slice(&Hash::hash(k));
-                &hk
+                &hk[..]
             } else {
                 k
             };
@@ -812,15 +821,29 @@ pub mod sha384 {
             }
             let mut ih = Hash::new();
             ih.update(&padded[..]);
-            ih.update(input);
+            HMAC { ih, padded }
+        }
 
-            for p in padded.iter_mut() {
+        /// Absorbs content into the HMAC state.
+        pub fn update(&mut self, input: impl AsRef<[u8]>) {
+            self.ih.update(input);
+        }
+
+        /// Computes the HMAC-SHA384 of all previously absorbed content.
+        pub fn finalize(mut self) -> [u8; 48] {
+            for p in self.padded.iter_mut() {
                 *p ^= 0x6a;
             }
             let mut oh = Hash::new();
-            oh.update(&padded[..]);
-            oh.update(&ih.finalize()[..]);
+            oh.update(&self.padded[..]);
+            oh.update(&self.ih.finalize()[..]);
             oh.finalize()
+        }
+
+        /// Verifies that the HMAC of absorbed content matches the expected MAC.
+        pub fn finalize_verify(self, expected: &[u8; 48]) -> bool {
+            let out = self.finalize();
+            super::verify(&out, expected)
         }
 
         /// Verify that a message's HMAC matches the expected value
@@ -880,42 +903,19 @@ pub mod sha384 {
         ///
         /// Panics if the requested output length is greater than 255 * 48 bytes (12240 bytes).
         pub fn expand(out: &mut [u8], prk: impl AsRef<[u8]>, info: impl AsRef<[u8]>) {
-            let prk = prk.as_ref();
             let info = info.as_ref();
             let mut counter: u8 = 1;
             assert!(out.len() < 0xff * 48);
-            let mut prev = [0u8; 48];
             let mut i: usize = 0;
             while i < out.len() {
-                let mut padded = [0x36u8; 128];
-                let mut hk = [0u8; 48];
-                let k2 = if prk.len() > 128 {
-                    hk.copy_from_slice(&Hash::hash(prk));
-                    &hk[..]
-                } else {
-                    prk
-                };
-                for (p, &k) in padded.iter_mut().zip(k2.iter()) {
-                    *p ^= k;
-                }
-                let mut ih = Hash::new();
-                ih.update(&padded[..]);
+                let mut hmac = HMAC::new(&prk);
                 if i != 0 {
-                    ih.update(&prev[..]);
+                    hmac.update(&out[i - 48..][..48]);
                 }
-                ih.update(info);
-                ih.update([counter]);
-
-                for p in padded.iter_mut() {
-                    *p ^= 0x6a;
-                }
-                let mut oh = Hash::new();
-                oh.update(&padded[..]);
-                oh.update(&ih.finalize()[..]);
-                prev = oh.finalize();
-
+                hmac.update(info);
+                hmac.update([counter]);
                 let left = core::cmp::min(48, out.len() - i);
-                out[i..][..left].copy_from_slice(&prev[..left]);
+                out[i..][..left].copy_from_slice(&hmac.finalize()[..left]);
                 counter += 1;
                 i += 48;
             }
@@ -1273,6 +1273,27 @@ fn hmac_streaming() {
 
     // Test finalize_verify
     let mut streaming = HMAC::new(key);
+    streaming.update(message);
+    assert!(streaming.finalize_verify(&oneshot));
+}
+
+#[cfg(feature = "sha384")]
+#[test]
+fn hmac_sha384_streaming() {
+    let key = b"secret key";
+    let message = b"Hello, World!";
+
+    let oneshot = sha384::HMAC::mac(message, key);
+
+    let mut streaming = sha384::HMAC::new(key);
+    streaming.update(b"Hello, ");
+    streaming.update(b"World!");
+    let result = streaming.finalize();
+
+    assert_eq!(oneshot, result);
+
+    // Test finalize_verify
+    let mut streaming = sha384::HMAC::new(key);
     streaming.update(message);
     assert!(streaming.finalize_verify(&oneshot));
 }
